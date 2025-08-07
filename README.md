@@ -111,6 +111,11 @@ gcloud services enable artifactregistry.googleapis.com
 6. **Push to Registry**: Container image is pushed to Google Artifact Registry
 7. **Deploy**: Application is deployed to Cloud Run with zero downtime
 
+<img width="1366" height="681" alt="image" src="https://github.com/user-attachments/assets/db4eae99-89c1-4f80-a955-b7cc0abd2370" />
+
+<img width="1366" height="685" alt="image" src="https://github.com/user-attachments/assets/fd5596eb-e253-431d-9223-d09651b36f73" />
+
+
 ### Application Details
 
 The Flask application (`main.py`) is a minimal web server that:
