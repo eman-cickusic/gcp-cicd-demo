@@ -86,6 +86,9 @@ In your GitHub repository, go to Settings → Secrets and variables → Actions,
 - `GCP_SA_KEY`: Contents of the `github-actions-key.json` file
 - `GCP_PROJECT_ID`: Your Google Cloud Project ID
 
+<img width="1366" height="685" alt="image" src="https://github.com/user-attachments/assets/0596263a-606d-4424-9cd7-fa6577e5cdc5" />
+
+
 ### 4. Enable Required APIs
 
 Make sure these Google Cloud APIs are enabled in your project:
