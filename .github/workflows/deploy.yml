@@ -1,54 +1,256 @@
-name: Deploy to Cloud Run
+name: Deploy to Cloud Run with Security Scanning
 
 on:
- push:
-   branches:
-     - main
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: my-app
+  REGION: us-central1
 
 jobs:
- deploy:
-   runs-on: ubuntu-latest
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
 
-   steps:
-   - name: Checkout source code
-     uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
 
-   - name: Authenticate to Google Cloud
-     uses: google-github-actions/auth@v2
-     with:
-       credentials_json: ${{ secrets.GCP_SA_KEY }}
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install bandit safety
 
-   - name: Set up gcloud SDK
-     uses: google-github-actions/setup-gcloud@v2
-     with:
-       project_id: ${{ secrets.GCP_PROJECT_ID }}
+    - name: Run Bandit Security Scan
+      run: |
+        bandit -r . -ll -f json -o bandit-report.json || true
+        bandit -r . -ll
 
-   # Unit Testing Steps
-   - name: Set up Python
-     uses: actions/setup-python@v4
-     with:
-       python-version: "3.10"
+    - name: Upload Bandit Scan Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: bandit-report
+        path: bandit-report.json
 
-   - name: Install dependencies for testing
-     run: pip install flask pytest
+    - name: Run Safety Check for Dependencies
+      run: safety check --json --output safety-report.json || true
 
-   - name: Run tests
-     run: pytest
- 
-   - name: Configure Docker for Artifact Registry
-     run: |
-       gcloud auth configure-docker us-central1-docker.pkg.dev
+    - name: Upload Safety Report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: safety-report
+        path: safety-report.json
 
-   - name: Build and push Docker image
-     run: |
-       docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-repo/my-app:latest .
-       docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-repo/my-app:latest
+    - name: Run Snyk Security Scan
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high --json-file-output=snyk-report.json
+      continue-on-error: true
 
-   - name: Deploy to Cloud Run
-     run: |
-       gcloud run deploy my-app \
-         --image=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-repo/my-app:latest \
-         --platform=managed \
-         --region=us-central1 \
-         --allow-unauthenticated \
-         --quiet
+    - name: Upload Snyk Report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: snyk-report
+        path: snyk-report.json
+
+    - name: Secret Detection with TruffleHog
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies for testing
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run tests with coverage
+      run: |
+        pytest --cov=. --cov-report=xml --cov-report=html
+
+    - name: Upload test coverage
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: htmlcov/
+
+  build-and-scan:
+    name: Build and Scan Container
+    runs-on: ubuntu-latest
+    needs: [security-scan, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up gcloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ env.PROJECT_ID }}
+
+    - name: Configure Docker for Artifact Registry
+      run: |
+        gcloud auth configure-docker us-central1-docker.pkg.dev
+
+    - name: Build Docker image
+      id: build
+      run: |
+        IMAGE_URI="us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/my-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+        docker build -t $IMAGE_URI .
+        echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/my-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        exit-code: '1'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Run Trivy scan for JSON report
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/my-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        format: 'json'
+        output: 'trivy-report.json'
+        severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+      continue-on-error: true
+
+    - name: Upload Trivy JSON Report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: trivy-report
+        path: trivy-report.json
+
+    - name: Push Docker image
+      run: |
+        docker push us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/my-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: build-and-scan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up gcloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ env.PROJECT_ID }}
+
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy ${{ env.SERVICE_NAME }} \
+          --image=us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/my-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+          --platform=managed \
+          --region=${{ env.REGION }} \
+          --allow-unauthenticated \
+          --port=8080 \
+          --memory=512Mi \
+          --cpu=1 \
+          --min-instances=0 \
+          --max-instances=100 \
+          --concurrency=80 \
+          --timeout=300 \
+          --set-env-vars="ENVIRONMENT=production" \
+          --quiet
+
+    - name: Get Service URL
+      run: |
+        SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} --region=${{ env.REGION }} --format='value(status.url)')
+        echo "Service deployed to: $SERVICE_URL"
+        echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
+
+    - name: Run Basic Health Check
+      run: |
+        sleep 30
+        curl -f ${{ env.SERVICE_URL }}/health || exit 1
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [security-scan, build-and-scan, deploy]
+    if: always()
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Generate Security Summary
+      run: |
+        echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+        echo "### Static Code Analysis (Bandit)" >> $GITHUB_STEP_SUMMARY
+        if [ -f bandit-report/bandit-report.json ]; then
+          echo "✅ Bandit scan completed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Bandit scan failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "### Dependency Vulnerability Scan" >> $GITHUB_STEP_SUMMARY
+        if [ -f safety-report/safety-report.json ]; then
+          echo "✅ Safety check completed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Safety check failed" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "### Container Vulnerability Scan" >> $GITHUB_STEP_SUMMARY
+        if [ -f trivy-report/trivy-report.json ]; then
+          echo "✅ Trivy scan completed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Trivy scan failed or found critical vulnerabilities" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ needs.deploy.result }}" == "success" ]; then
+          echo "✅ Deployment successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Deployment failed or skipped" >> $GITHUB_STEP_SUMMARY
+        fi
