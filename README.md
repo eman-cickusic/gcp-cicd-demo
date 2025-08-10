@@ -1,4 +1,27 @@
-## Security Scanning Results
+## GCP CI/CD DEMO
+
+### **Security Integration Achievements**
+- **✅ Integrated automated security scanning into CI/CD pipeline** using Trivy, Snyk, and Bandit to detect vulnerabilities in Docker images and application code, preventing insecure deployments
+- **✅ Implemented security gates** in GitHub Actions that automatically block pull requests if critical vulnerabilities are found, enforcing security standards
+- **✅ Strengthened application security by migrating secrets** from hardcoded values to Google Secret Manager, eliminating credential exposure in codebase
+- **✅ Established comprehensive SAST (Static Application Security Testing)** with multiple tools including Bandit for Python security issues and Snyk for dependency vulnerabilities
+- **✅ Built container security scanning** with Trivy integration that blocks deployment of images with critical CVEs
+- **✅ Implemented secure coding practices** including input validation, security headers, and non-root container execution
+
+### **DevSecOps Pipeline Features**
+- **Multi-stage security scanning**: Code → Dependencies → Container → Deployment
+- **Automated security reporting**: Detailed vulnerability reports with severity classification
+- **Policy-based deployment gates**: Configurable thresholds for different vulnerability levels
+- **Secret detection**: Automated scanning for hardcoded credentials and API keys
+- **Compliance ready**: Security scan results formatted for audit and compliance reporting
+
+### **Technical Skills Demonstrated**
+- **Google Cloud Platform**: Cloud Run, Secret Manager, Artifact Registry, IAM, Logging
+- **Infrastructure as Code**: Terraform with security best practices and compliance
+- **CI/CD Security**: GitHub Actions with integrated security toolchain
+- **Container Security**: Multi-stage Docker builds, vulnerability scanning, non-root execution
+- **Application Security**: Flask security hardening, OWASP best practices, secure API design
+- **Monitoring & Observability**: Structured logging, security event monitoring, alerting## Security Scanning Results
 
 The pipeline includes multiple security gates:
 
