@@ -1,1 +1,99 @@
+# bandit.yaml - Bandit security scanner configuration
+# This file configures the Bandit Python security linter
 
+# Tests to skip (use with caution)
+skips:
+  # Skip test for use of assert (often used in tests)
+  # - B101
+  
+  # Skip test for hardcoded password (we use proper secret management)
+  # - B105
+
+# Tests to include (default is all)
+tests:
+  - B101  # Use of assert detected
+  - B102  # Test for exec used
+  - B103  # Set bad file permissions
+  - B104  # Possible binding to all interfaces
+  - B105  # Possible hardcoded password
+  - B106  # Test for use of hard coded password strings
+  - B107  # Test for use of hard coded password argument defaults
+  - B108  # Probable insecure usage of temp file/directory
+  - B110  # Try, Except, Pass detected
+  - B112  # Try, Except, Continue detected
+  - B201  # Flask app run with debug=True
+  - B301  # Pickle usage (potential code execution)
+  - B302  # Pickle usage with loads/dumps (potential code execution)
+  - B303  # MD5 insecure hash function
+  - B304  # SHA1 insecure hash function
+  - B305  # Cipher usage
+  - B306  # mktemp usage (insecure temporary file)
+  - B307  # eval usage (code injection)
+  - B308  # mark_safe usage (XSS)
+  - B309  # HTTPSConnection with check_hostname disabled
+  - B310  # urllib usage with file:// schema
+  - B311  # Random usage for cryptographic purposes
+  - B312  # Telnet usage
+  - B313  # XML usage (potential XXE)
+  - B314  # XML usage (potential XXE)
+  - B315  # XML usage (potential XXE)
+  - B316  # XML usage (potential XXE)
+  - B317  # XML usage (potential XXE)
+  - B318  # XML usage (potential XXE)
+  - B319  # XML usage (potential XXE)
+  - B320  # XML usage (potential XXE)
+  - B321  # FTP usage
+  - B322  # Input function usage
+  - B323  # Unverified context usage
+  - B324  # Insecure hash function usage
+  - B325  # Tempfile usage
+  - B401  # Import of telnetlib
+  - B402  # Import of ftplib
+  - B403  # Import of pickle
+  - B404  # Import of subprocess
+  - B405  # Import of xml modules
+  - B406  # Import of mktemp
+  - B407  # Import of xml modules
+  - B408  # Import of xml modules
+  - B409  # Import of xml modules
+  - B410  # Import of xml modules
+  - B411  # Import of xml modules
+  - B412  # Import of telnetlib
+  - B413  # Import of pyCrypto
+  - B501  # Request with verify disabled
+  - B502  # SSL with insecure TLS version
+  - B503  # SSL with insecure cipher
+  - B504  # SSL context check_hostname disabled
+  - B505  # Weak cryptographic key
+  - B506  # Test for use of yaml load
+  - B507  # SSH usage
+  - B601  # Paramiko usage
+  - B602  # subprocess with shell=True
+  - B603  # subprocess without shell equals true
+  - B604  # Function call with shell=True
+  - B605  # Start process with a shell
+  - B606  # Start process with no shell
+  - B607  # Starting a process with a partial path
+  - B608  # Possible SQL injection
+  - B609  # Linux command injection
+  - B610  # Django extra used
+  - B611  # Django raw SQL used
+  - B701  # Test for not auto escaping in jinja2
+  - B702  # Test for use of mako templates
+  - B703  # Test for use of django mark_safe
+
+# Severity levels: LOW, MEDIUM, HIGH
+# Confidence levels: LOW, MEDIUM, HIGH
+
+# Only report issues with medium or high confidence
+# and medium or high severity
+assert_used: 
+  skips: ['*/test_*.py', '*/tests.py']
+  
+exclude_dirs:
+  - /tests
+  - /test
+  - /.venv
+  - /venv
+  - /.git
+  - /__pycache__
