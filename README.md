@@ -1,19 +1,56 @@
-# GCP CI/CD Demo
+## Security Scanning Results
 
-A complete demonstration of CI/CD pipeline using Google Cloud Platform services including Cloud Run, Artifact Registry, and GitHub Actions.
+The pipeline includes multiple security gates:
+
+### Static Code Analysis
+- **Bandit**: Scans for common Python security issues
+- **Snyk**: Checks dependencies for known vulnerabilities
+- **Results**: Pipeline fails on HIGH or CRITICAL findings
+
+### Container Security
+- **Trivy**: Comprehensive container vulnerability scanning
+- **Policy**: Blocks deployment if critical CVEs found
+- **Reporting**: Detailed vulnerability reports in GitHub Actions
+
+### Secret Detection
+- **Automated scanning**: Prevents hardcoded secrets from being committed
+- **Secret Manager Integration**: Secure secret retrieval at runtime### Local Security Testing
+
+```bash
+# Run Trivy scan on built image
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $HOME/.cache:/root/.cache aquasec/trivy:latest image gcp-cicd-demo
+
+# Run Bandit security scan
+bandit -r . -ll -f json
+```### 5. Create Sample Secret in Secret Manager
+
+Create a sample API key in Secret Manager to demonstrate secure secrets handling:
+
+```bash
+# Create a sample API key secret
+echo "your-api-key-here" | gcloud secrets create api-key --data-file=-
+```# GCP DevSecOps CI/CD Demo
+
+A complete demonstration of secure CI/CD pipeline with integrated security scanning using Google Cloud Platform services including Cloud Run, Artifact Registry, Secret Manager, and GitHub Actions with automated vulnerability detection.
 
 ## Overview
 
-This project showcases a DevOps workflow that automatically builds, tests, and deploys a Flask application to Google Cloud Run whenever code is pushed to the main branch. The infrastructure is managed using Terraform, and the deployment pipeline is handled by GitHub Actions.
+This project showcases a modern DevSecOps workflow that automatically builds, tests, scans for security vulnerabilities, and deploys a Flask application to Google Cloud Run. The pipeline includes multiple security gates that prevent insecure code and container images from being deployed to production. The infrastructure is managed using Terraform, and the deployment pipeline is handled by GitHub Actions.
 
 ## Architecture
 
-- **Application**: Simple Flask web application
+- **Application**: Flask web application with secure secrets management
 - **Container Registry**: Google Artifact Registry
 - **Deployment Platform**: Google Cloud Run
-- **CI/CD**: GitHub Actions
+- **CI/CD**: GitHub Actions with integrated security scanning
 - **Infrastructure as Code**: Terraform
 - **Testing**: pytest for unit tests
+- **Security Scanning**: 
+  - **Trivy**: Container vulnerability scanning
+  - **Snyk**: Static Application Security Testing (SAST)
+  - **Bandit**: Python security linter
+- **Secrets Management**: Google Secret Manager
 
 ## Prerequisites
 
@@ -24,6 +61,7 @@ Before getting started, ensure you have:
 - `gcloud` CLI installed and configured
 - Terraform installed (v1.0+)
 - Docker installed locally (for testing)
+- Snyk account (free tier available) and API token
 
 ## Project Structure
 
@@ -31,14 +69,18 @@ Before getting started, ensure you have:
 gcp-cicd-demo/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml          # GitHub Actions workflow
+│       ├── deploy.yml          # Main CI/CD workflow with security scanning
+│       └── security-scan.yml   # Dedicated security scanning for PRs
 ├── terraform/
 │   ├── main.tf                 # Main Terraform configuration
 │   ├── variables.tf            # Variable definitions
 │   └── outputs.tf              # Output definitions
-├── main.py                     # Flask application
+├── security/
+│   ├── .trivyignore           # Trivy vulnerability ignore rules
+│   └── bandit.yaml            # Bandit security scanning config
+├── main.py                     # Flask application with secure secrets
 ├── requirements.txt            # Python dependencies
-├── Dockerfile                  # Container configuration
+├── Dockerfile                  # Multi-stage secure container build
 ├── test_main.py               # Unit tests
 └── README.md                  # This file
 ```
@@ -65,9 +107,10 @@ terraform apply -var="project_id=YOUR_GCP_PROJECT_ID" -var="project_number=YOUR_
 
 This will create:
 - Artifact Registry repository for Docker images
-- Service account for GitHub Actions
-- Proper IAM roles and permissions
-- Cloud Run service configuration
+- Service account for GitHub Actions with security permissions
+- Google Secret Manager for secure credential storage
+- Proper IAM roles and permissions including Secret Manager access
+- Cloud Run service configuration with security best practices
 
 ### 2. Service Account Key Generation
 
@@ -85,9 +128,7 @@ In your GitHub repository, go to Settings → Secrets and variables → Actions,
 
 - `GCP_SA_KEY`: Contents of the `github-actions-key.json` file
 - `GCP_PROJECT_ID`: Your Google Cloud Project ID
-
-<img width="1366" height="685" alt="image" src="https://github.com/user-attachments/assets/0596263a-606d-4424-9cd7-fa6577e5cdc5" />
-
+- `SNYK_TOKEN`: Your Snyk API token for security scanning
 
 ### 4. Enable Required APIs
 
@@ -97,46 +138,71 @@ Make sure these Google Cloud APIs are enabled in your project:
 gcloud services enable cloudbuild.googleapis.com
 gcloud services enable run.googleapis.com
 gcloud services enable artifactregistry.googleapis.com
+gcloud services enable secretmanager.googleapis.com
 ```
 
 ## How It Works
 
-### CI/CD Pipeline Flow
+### DevSecOps Pipeline Flow
 
-1. **Trigger**: Push to main branch triggers GitHub Actions workflow
+1. **Trigger**: Push to main branch or pull request creation
 2. **Checkout**: Code is checked out from repository
-3. **Authentication**: GitHub Actions authenticates with Google Cloud using service account
-4. **Testing**: Python dependencies are installed and unit tests are run with pytest
-5. **Docker Build**: Application is containerized using the provided Dockerfile
-6. **Push to Registry**: Container image is pushed to Google Artifact Registry
-7. **Deploy**: Application is deployed to Cloud Run with zero downtime
+3. **Security Gates**:
+   - **Static Code Analysis**: Bandit scans Python code for security issues
+   - **Dependency Vulnerability Scan**: Snyk checks for vulnerable dependencies
+   - **Secret Detection**: Automated scan for hardcoded secrets
+4. **Testing**: Python dependencies are installed and unit tests are run
+5. **Docker Build**: Multi-stage secure container build
+6. **Container Security Scan**: Trivy scans the built image for vulnerabilities
+7. **Security Gate**: Pipeline fails if critical vulnerabilities are found
+8. **Push to Registry**: Only secure images are pushed to Artifact Registry
+9. **Deploy**: Secure deployment to Cloud Run with Secret Manager integration
 
-<img width="1366" height="681" alt="image" src="https://github.com/user-attachments/assets/db4eae99-89c1-4f80-a955-b7cc0abd2370" />
+### Security Features
 
-<img width="1366" height="685" alt="image" src="https://github.com/user-attachments/assets/fd5596eb-e253-431d-9223-d09651b36f73" />
+**Static Application Security Testing (SAST)**:
+- Bandit analyzes Python code for common security issues
+- Snyk performs dependency vulnerability scanning
+- Custom security rules and policies enforcement
 
+**Container Security**:
+- Trivy scans Docker images for OS and application vulnerabilities
+- Multi-stage builds to minimize attack surface
+- Non-root user execution
+- Minimal base images
+
+**Secrets Management**:
+- Google Secret Manager integration
+- No hardcoded API keys or credentials
+- Secure secret injection at runtime
 
 ### Application Details
 
-The Flask application (`main.py`) is a minimal web server that:
+The Flask application (`main.py`) demonstrates secure coding practices:
+- Integrates with Google Secret Manager for API keys
 - Runs on port 8080 (Cloud Run standard)
-- Serves a simple "Hello from Cloud Run CI/CD pipeline!" message
-- Includes basic unit tests to validate functionality
+- Implements security headers and best practices
+- Includes comprehensive unit tests including security test cases
 
 ### Container Configuration
 
-The `Dockerfile` creates an optimized container that:
-- Uses Python 3.10 slim base image
+The `Dockerfile` creates a secure, multi-stage container that:
+- Uses minimal Python 3.10 slim base image
+- Implements multi-stage build to reduce attack surface
+- Runs as non-root user for enhanced security
 - Installs only necessary dependencies
-- Runs the application on all network interfaces
+- Implements security scanning during build process
 
 ## Local Development
 
 ### Running Locally
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies including security tools
+pip install -r requirements.txt bandit
+
+# Run security scan on code
+bandit -r . -f json -o bandit-report.json
 
 # Run the application
 python main.py
@@ -148,11 +214,14 @@ curl http://localhost:8080
 ### Running Tests
 
 ```bash
-# Install test dependencies
-pip install pytest
+# Install test and security dependencies
+pip install pytest bandit
 
-# Run tests
-pytest test_main.py
+# Run security tests
+bandit -r . -ll
+
+# Run unit tests
+pytest test_main.py -v
 ```
 
 ### Local Docker Testing
@@ -181,9 +250,11 @@ git push origin main
 ```
 
 The GitHub Actions workflow will automatically:
+- Run comprehensive security scans (SAST, dependency check, container scan)
+- Block deployment if critical vulnerabilities are found
 - Run tests
-- Build and push the Docker image
-- Deploy to Cloud Run
+- Build and push the Docker image (only if security checks pass)
+- Deploy to Cloud Run with secure configuration
 - Make the application publicly accessible
 
 ### Manual Deployment
@@ -210,14 +281,18 @@ gcloud run deploy my-app \
 
 - **Cloud Run Console**: Monitor service health, traffic, and performance
 - **Cloud Logging**: View application and system logs
-- **GitHub Actions**: Monitor build and deployment status
+- **GitHub Actions**: Monitor build, security scan results, and deployment status
+- **Security Dashboard**: Track vulnerability trends and security posture
 
 ## Security Considerations
 
-- Service account follows principle of least privilege
-- Container runs as non-root user
-- Cloud Run service can be configured for authentication if needed
-- Secrets are stored securely in GitHub Secrets
+- **Zero Trust Architecture**: No hardcoded credentials or secrets
+- **Least Privilege**: Service accounts follow principle of least privilege
+- **Container Security**: Multi-stage builds and non-root execution
+- **Automated Security**: Continuous vulnerability scanning and monitoring
+- **Secret Management**: Google Secret Manager integration
+- **Network Security**: Cloud Run VPC configuration options
+- **Compliance**: Security scanning results can be used for compliance reporting
 
 ## Cost Optimization
 
@@ -230,10 +305,12 @@ This setup is designed to be cost-effective:
 
 ### Common Issues
 
-1. **Authentication Errors**: Verify service account key is correctly added to GitHub Secrets
-2. **Permission Denied**: Ensure all required IAM roles are assigned via Terraform
-3. **Build Failures**: Check GitHub Actions logs for specific error details
-4. **Deployment Issues**: Verify Cloud Run service configuration and image registry path
+1. **Security Scan Failures**: Check security scan results in GitHub Actions logs
+2. **Authentication Errors**: Verify service account key is correctly added to GitHub Secrets
+3. **Permission Denied**: Ensure all required IAM roles including Secret Manager access are assigned
+4. **Build Failures**: Check GitHub Actions logs for specific error details
+5. **Deployment Issues**: Verify Cloud Run service configuration and image registry path
+6. **Secret Access Issues**: Verify Secret Manager permissions and secret existence
 
 ### Useful Commands
 
@@ -244,6 +321,30 @@ gcloud run services list
 # View service logs
 gcloud logging read "resource.type=cloud_run_revision" --limit 50
 
+# Check secrets in Secret Manager
+gcloud secrets list
+
 # Test deployed service
 curl $(gcloud run services describe my-app --region=us-central1 --format='value(status.url)')
+
+# Run local security scan
+bandit -r . -ll
+trivy fs .
 ```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+- Adding compliance reporting and audit trails
+- Integrating with security information and event management (SIEM) systems
+- Implementing infrastructure security scanning with tools like Checkov
