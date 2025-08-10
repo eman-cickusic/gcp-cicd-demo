@@ -1,0 +1,17 @@
+# .trivyignore - Trivy vulnerability scanner ignore rules
+# This file allows you to ignore specific CVEs that are not applicable
+# or have been assessed as acceptable risk
+
+# Example: Ignore low severity vulnerabilities in development dependencies
+# CVE-2023-12345
+
+# Ignore vulnerabilities in base OS packages that cannot be easily updated
+# and have been assessed as low risk for this containerized application
+# CVE-2023-67890
+
+# Note: Be very careful about ignoring vulnerabilities
+# Each ignored CVE should have a corresponding risk assessment
+# and should be documented with justification
+
+# Format: One CVE per line
+# Lines starting with # are comments
