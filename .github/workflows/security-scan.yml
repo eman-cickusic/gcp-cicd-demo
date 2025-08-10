@@ -1,0 +1,276 @@
+name: Security Gate for Pull Requests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install bandit safety semgrep
+
+    - name: Run Bandit Security Scan
+      id: bandit
+      run: |
+        echo "Running Bandit security scan..."
+        bandit -r . -ll -f json -o bandit-report.json
+        BANDIT_ISSUES=$(cat bandit-report.json | jq '.results | length')
+        echo "bandit_issues=$BANDIT_ISSUES" >> $GITHUB_OUTPUT
+        if [ $BANDIT_ISSUES -gt 0 ]; then
+          echo "::warning::Found $BANDIT_ISSUES security issues with Bandit"
+          bandit -r . -ll
+        fi
+
+    - name: Run Safety Check
+      id: safety
+      run: |
+        echo "Running Safety dependency check..."
+        safety check --json --output safety-report.json || true
+        SAFETY_ISSUES=$(cat safety-report.json | jq 'if type=="array" then length else 0 end')
+        echo "safety_issues=$SAFETY_ISSUES" >> $GITHUB_OUTPUT
+        if [ $SAFETY_ISSUES -gt 0 ]; then
+          echo "::warning::Found $SAFETY_ISSUES vulnerable dependencies"
+          safety check
+        fi
+
+    - name: Run Semgrep SAST Scan
+      id: semgrep
+      run: |
+        echo "Running Semgrep SAST scan..."
+        semgrep --config=auto --json --output=semgrep-report.json . || true
+        SEMGREP_ISSUES=$(cat semgrep-report.json | jq '.results | length')
+        echo "semgrep_issues=$SEMGREP_ISSUES" >> $GITHUB_OUTPUT
+        if [ $SEMGREP_ISSUES -gt 0 ]; then
+          echo "::warning::Found $SEMGREP_ISSUES potential security issues with Semgrep"
+        fi
+
+    - name: Run Snyk Security Scan
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=medium --json-file-output=snyk-report.json
+      continue-on-error: true
+
+    - name: Secret Detection
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: ${{ github.event.repository.default_branch }}
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    - name: Build Docker Image for Scanning
+      run: |
+        docker build -t temp-security-scan:latest .
+
+    - name: Run Trivy Container Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'temp-security-scan:latest'
+        format: 'json'
+        output: 'trivy-report.json'
+        severity: 'CRITICAL,HIGH'
+        exit-code: '0'
+
+    - name: Evaluate Security Gate
+      id: security-gate
+      run: |
+        echo "Evaluating security scan results..."
+        
+        # Count critical issues
+        BANDIT_CRITICAL=0
+        SAFETY_CRITICAL=0
+        TRIVY_CRITICAL=0
+        SNYK_CRITICAL=0
+        
+        # Check Bandit results for high severity
+        if [ -f bandit-report.json ]; then
+          BANDIT_HIGH=$(cat bandit-report.json | jq '[.results[] | select(.issue_severity == "HIGH")] | length')
+          BANDIT_CRITICAL=$BANDIT_HIGH
+        fi
+        
+        # Check Safety results
+        if [ -f safety-report.json ]; then
+          SAFETY_CRITICAL=$(cat safety-report.json | jq 'if type=="array" then [.[] | select(.vulnerability_id != null)] | length else 0 end')
+        fi
+        
+        # Check Trivy results
+        if [ -f trivy-report.json ]; then
+          TRIVY_HIGH=$(cat trivy-report.json | jq '.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL") | .Severity' | wc -l)
+          TRIVY_CRITICAL=$TRIVY_HIGH
+        fi
+        
+        # Check Snyk results
+        if [ -f snyk-report.json ]; then
+          SNYK_CRITICAL=$(cat snyk-report.json | jq '.vulnerabilities[]? | select(.severity == "high" or .severity == "critical")' | jq -s 'length')
+        fi
+        
+        TOTAL_CRITICAL=$((BANDIT_CRITICAL + SAFETY_CRITICAL + TRIVY_CRITICAL + SNYK_CRITICAL))
+        
+        echo "Security Scan Summary:"
+        echo "- Bandit Critical/High: $BANDIT_CRITICAL"
+        echo "- Safety Vulnerabilities: $SAFETY_CRITICAL"
+        echo "- Trivy Critical/High: $TRIVY_CRITICAL"
+        echo "- Snyk Critical/High: $SNYK_CRITICAL"
+        echo "- Total Critical Issues: $TOTAL_CRITICAL"
+        
+        echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+        echo "bandit_critical=$BANDIT_CRITICAL" >> $GITHUB_OUTPUT
+        echo "safety_critical=$SAFETY_CRITICAL" >> $GITHUB_OUTPUT
+        echo "trivy_critical=$TRIVY_CRITICAL" >> $GITHUB_OUTPUT
+        echo "snyk_critical=$SNYK_CRITICAL" >> $GITHUB_OUTPUT
+
+    - name: Comment PR with Security Results
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const totalCritical = ${{ steps.security-gate.outputs.total_critical }};
+          const banditCritical = ${{ steps.security-gate.outputs.bandit_critical }};
+          const safetyCritical = ${{ steps.security-gate.outputs.safety_critical }};
+          const trivyCritical = ${{ steps.security-gate.outputs.trivy_critical }};
+          const snykCritical = ${{ steps.security-gate.outputs.snyk_critical }};
+          
+          const statusIcon = totalCritical === 0 ? '✅' : '⚠️';
+          const gateStatus = totalCritical === 0 ? 'PASSED' : 'WARNING';
+          
+          const body = `## ${statusIcon} Security Gate ${gateStatus}
+          
+          ### Security Scan Results
+          
+          | Tool | Critical/High Issues | Status |
+          |------|---------------------|--------|
+          | Bandit (SAST) | ${banditCritical} | ${banditCritical === 0 ? '✅' : '⚠️'} |
+          | Safety (Dependencies) | ${safetyCritical} | ${safetyCritical === 0 ? '✅' : '⚠️'} |
+          | Trivy (Container) | ${trivyCritical} | ${trivyCritical === 0 ? '✅' : '⚠️'} |
+          | Snyk (Dependencies) | ${snykCritical} | ${snykCritical === 0 ? '✅' : '⚠️'} |
+          
+          **Total Critical/High Issues**: ${totalCritical}
+          
+          ${totalCritical > 0 ? 
+            '⚠️ **Security Issues Found**: Please review and fix the security vulnerabilities before merging.' : 
+            '✅ **All Security Checks Passed**: No critical security issues detected.'}
+          
+          ### What happens next?
+          ${totalCritical > 5 ? 
+            '❌ **Deployment Blocked**: Too many critical security issues. Deployment will be blocked.' : 
+            '✅ **Deployment Allowed**: Security gate passed or issues are within acceptable limits.'}
+          
+          <details>
+          <summary>View detailed scan results</summary>
+          
+          Download the artifacts from this workflow run to see detailed reports from each security tool.
+          </details>`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+          semgrep-report.json
+          snyk-report.json
+          trivy-report.json
+
+    - name: Fail if Critical Issues Found
+      if: steps.security-gate.outputs.total_critical > 5
+      run: |
+        echo "❌ Security gate failed: Found ${{ steps.security-gate.outputs.total_critical }} critical security issues"
+        echo "This exceeds the maximum allowed threshold of 5 critical issues."
+        echo "Please fix the security vulnerabilities before merging this PR."
+        exit 1
+
+  run-tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run tests
+      run: |
+        pytest --cov=. --cov-report=term-missing --cov-fail-under=80
+
+    - name: Comment PR with Test Results
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const testStatus = '${{ job.status }}' === 'success' ? '✅ PASSED' : '❌ FAILED';
+          const body = `## ${testStatus.split(' ')[0]} Test Results ${testStatus.split(' ')[1]}
+          
+          Unit tests have ${testStatus.split(' ')[1].toLowerCase()}.
+          
+          ${testStatus.includes('FAILED') ? 
+            '❌ **Tests Failed**: Please fix failing tests before merging.' : 
+            '✅ **All Tests Passed**: Code coverage requirements met.'}`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [security-gate, run-tests]
+    if: always()
+    steps:
+    - name: Generate Security Summary
+      run: |
+        echo "## 🔒 Security Gate Summary for PR #${{ github.event.number }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Security Scan | ${{ needs.security-gate.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Unit Tests | ${{ needs.run-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ needs.security-gate.result }}" == "success" && "${{ needs.run-tests.result }}" == "success" ]]; then
+          echo "✅ **PR Ready for Review**: All security checks and tests passed." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **PR Needs Attention**: Some checks failed. Please review and fix issues." >> $GITHUB_STEP_SUMMARY
+        fi
