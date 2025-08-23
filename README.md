@@ -8,7 +8,7 @@
 - **✅ Built container security scanning** with Trivy integration that blocks deployment of images with critical CVEs
 - **✅ Implemented secure coding practices** including input validation, security headers, and non-root container execution
 
-### **DevSecOps Pipeline Features** 
+### **DevSecOps Pipeline Features**  
 - **Multi-stage security scanning**: Code → Dependencies → Container → Deployment
 - **Automated security reporting**: Detailed vulnerability reports with severity classification
 - **Policy-based deployment gates**: Configurable thresholds for different vulnerability levels
